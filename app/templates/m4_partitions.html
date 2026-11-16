@@ -1,4 +1,108 @@
 {% extends "base.html" %}{% block content %}
-<div class="grid module-4"><section class="panel panel--primary"><div class="panel__head"><h2>分区判定记录</h2><span class="panel__meta">M4 · {{ data.status|default('READY') }}</span></div><div class="panel__body panel__body--scroll"><table class="ledger"><thead><tr><th>字段</th><th>值</th><th>证据</th></tr></thead><tbody>{% for key, value in data.items() %}<tr><td>{{ key }}</td><td class="num">{{ value }}</td><td>R{{ loop.index }}</td></tr>{% endfor %}</tbody></table></div></section>
-<div class="stack"><section class="panel"><div class="panel__head"><h2>原因码</h2><span class="panel__meta">{{ data.reason|default('OK') }}</span></div><div class="panel__body bars"><i style="--v:56%"></i><i style="--v:53%"></i></div></section><section class="panel"><div class="panel__head"><h2>本次动作</h2><span class="panel__meta">/api/partitions</span></div><div class="panel__body"><button class="btn btn--primary" data-endpoint="/api/partitions">运行 分区判定</button><pre class="result">等待运行</pre></div></section></div></div>
+{% if msg %}<div class="flash" role="alert">{{ msg }}</div>{% endif %}
+<div class="grid module-4">
+<section class="panel panel--primary">
+  <div class="panel__head"><h2>分区归属</h2><span class="panel__meta">M4 · {{ data.status|default('EMPTY') }} · {{ data.source or '-' }}</span></div>
+  <div class="panel__body panel__body--scroll">
+    {% if data.partitions %}
+    <table class="ledger">
+      <thead><tr><th>分区</th><th>对象数</th><th>空分区</th><th>对象</th></tr></thead>
+      <tbody>
+      {% for part in data.partitions %}
+        <tr><td class="mono">{{ part.partition }}</td><td class="num">{{ part.count }}</td>
+        <td>{{ '是' if part.empty else '否' }}</td>
+        <td class="mono">{{ part.objects|join(' , ') }}{% if part.markers %}<br>[标记] {{ part.markers|join(' , ') }}{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="hint">尚未导入清单。</p>{% endif %}
+  </div>
+</section>
+
+<div class="stack">
+  <section class="panel">
+    <div class="panel__head"><h2>导入清单</h2><span class="panel__meta">{{ data.digest or '' }}</span></div>
+    <div class="panel__body">
+      <form method="post" action="/partitions/import" class="form" enctype="multipart/form-data">
+        <label>清单来源
+          <select name="source">
+            <option value="supplier" {% if data.source != 'native' %}selected{% endif %}>供货方（转义写法）</option>
+            <option value="native" {% if data.source == 'native' %}selected{% endif %}>原生（字面文件名）</option>
+          </select>
+        </label>
+        <label>清单格式
+          <select name="format">
+            <option value="auto">自动</option><option value="csv">CSV</option><option value="jsonl">JSONL</option>
+          </select>
+        </label>
+        <label>清单文件
+          <input type="file" name="manifest_file" accept=".csv,.jsonl,.txt,text/csv,application/jsonl">
+        </label>
+        <label>或粘贴清单内容（CSV 含 key,size,etag 表头）<textarea name="text" rows="5" placeholder="key,size,etag&#10;dt=2026-11-15/hour=00/a.parquet,120,aaa"></textarea></label>
+        <label>现存对象（每行一个，按字面解释）<textarea name="objects" rows="3" placeholder="dt=2026-11-15/hour=00/a.parquet"></textarea></label>
+        <label>期望小时（逗号或空白分隔）<input name="expected_hours" placeholder="00 01 02 03"></label>
+        <button class="btn btn--primary" type="submit">导入并归属</button>
+      </form>
+    </div>
+  </section>
+  <section class="panel">
+    <div class="panel__head"><h2>数量核对</h2><span class="panel__meta">{{ data.reason|default('OK') }} · {{ data.reason_text|default('') }}</span></div>
+    <div class="panel__body metrics">
+      <span>输入 <b>{{ data.input_count|default(0) }}</b></span>
+      <span>有效 <b>{{ data.valid_count|default(0) }}</b></span>
+      <span>隔离 <b>{{ data.quarantine_count|default(0) }}</b></span>
+      <span>空行 <b>{{ data.empty_count|default(0) }}</b></span>
+      <span>分区 <b>{{ data.partition_count|default(0) }}</b></span>
+      <span>守恒 <b>{{ '是' if data.balanced|default(true) else '否' }}</b></span>
+      <span>缺失对象 <b>{{ data.missing_objects|length }}</b></span>
+      <span>孤立对象 <b>{{ data.orphan_objects|length }}</b></span>
+      <span>缺失小时 <b>{{ data.missing_hours|join(',') or '-' }}</b></span>
+    </div>
+    {% if data.missing_objects or data.orphan_objects %}
+    <div class="panel__body">
+      {% if data.missing_objects %}<p class="hint">缺失：{{ data.missing_objects|join(' , ') }}</p>{% endif %}
+      {% if data.orphan_objects %}<p class="hint">孤立：{{ data.orphan_objects|join(' , ') }}</p>{% endif %}
+    </div>
+    {% endif %}
+  </section>
+</div>
+</div>
+
+<div class="grid module-4">
+<section class="panel">
+  <div class="panel__head"><h2>归属明细</h2><span class="panel__meta">有效 {{ data.assignments|length }}</span></div>
+  <div class="panel__body panel__body--scroll">
+    <table class="ledger">
+      <thead><tr><th>行</th><th>原键</th><th>分区</th><th>解释后</th><th>来源</th><th>现存</th></tr></thead>
+      <tbody>{% for row in data.assignments %}
+      <tr><td class="num">{{ row.source_line }}</td><td class="mono">{{ row.raw_key }}</td>
+      <td class="mono">{{ row.partition }}</td><td class="mono">{{ row.target }}</td>
+      <td>{{ row.source }}</td><td>{{ '有' if row.object_found else ('无' if row.object_found is not none else '-') }}</td></tr>
+      {% endfor %}</tbody>
+    </table>
+  </div>
+</section>
+<section class="panel">
+  <div class="panel__head"><h2>隔离与重放</h2><span class="panel__meta">隔离 {{ data.quarantine|length }}</span></div>
+  <div class="panel__body panel__body--scroll">
+    {% if data.quarantine %}
+    <table class="ledger">
+      <thead><tr><th>行</th><th>原键</th><th>原因</th><th>尝试</th><th>重放</th></tr></thead>
+      <tbody>{% for row in data.quarantine %}
+      <tr><td class="num">{{ row.source_line }}</td><td class="mono">{{ row.raw_key if row.raw_key is not none else row.raw_value }}</td>
+      <td>{{ row.reason_code }} · {{ row.reason_text }}{% if row.last_error %}<br><span class="hint">上轮失败：{{ row.last_error }}</span>{% endif %}</td><td class="num">{{ row.attempts }}</td>
+      <td><form method="post" action="/partitions/{{ data.batch_id }}/replay" class="inline">
+        <input type="hidden" name="row_id" value="{{ row.row_id }}">
+        <input name="target" placeholder="修正后的键" size="16">
+        <button class="btn" type="submit">重放</button>
+      </form></td></tr>
+      {% endfor %}</tbody>
+    </table>
+    {% else %}<p class="hint">没有隔离行。</p>{% endif %}
+    {% if data.replay_notice %}
+    <p class="hint">上轮重放：尝试 {{ data.replay_notice.attempted }}，采纳 {{ data.replay_notice.adopted }}，仍隔离 {{ data.replay_notice.still_quarantined }}{% if data.replay_notice.noop %}（无可重放行）{% endif %}；累计重放 {{ data.replays }} 次，有效 {{ data.valid_count }}，隔离 {{ data.quarantine_count }}。</p>
+    {% endif %}
+  </div>
+</section>
+</div>
 {% endblock %}
